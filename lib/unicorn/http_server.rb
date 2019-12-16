@@ -686,6 +686,8 @@ class Unicorn::HttpServer
     trap(:USR1) { nr = -65536 }
 
     ready = readers.dup
+    high_priority_reader = readers.first
+    last_processed_is_high_priority = false
     @after_worker_ready.call(self, worker)
 
     begin
@@ -697,18 +699,19 @@ class Unicorn::HttpServer
         # Unicorn::Worker#kgio_tryaccept is not like accept(2) at all,
         # but that will return false
         if client = sock.kgio_tryaccept
+          last_processed_is_high_priority = sock == high_priority_reader
           process_client(client)
           nr += 1
           worker.tick = time_now.to_i
         end
-        break if nr < 0
+        break if nr < 0 || last_processed_is_high_priority
       end
 
       # make the following bet: if we accepted clients this round,
       # we're probably reasonably busy, so avoid calling select()
       # and do a speculative non-blocking accept() on ready listeners
       # before we sleep again in select().
-      unless nr == 0
+      unless nr == 0 || !last_processed_is_high_priority
         tmp = ready.dup
         redo
       end
